@@ -988,7 +988,21 @@
       <div class="card-title" id="card-missione-title">Dati Missione</div>
 
       <label>Equipaggio</label>
-      <input type="text" id="equipaggio" placeholder="Es. Rossi M. - Bianchi V.">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <select id="qualifica1" style="width:72px;flex-shrink:0;">
+          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VP</option>
+        </select>
+        <input type="text" id="nome1" placeholder="Cognome Nome" style="flex:1;">
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="qualifica2" style="width:72px;flex-shrink:0;">          
+          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VP</option>
+        </select>
+        <input type="text" id="nome2" placeholder="Cognome Nome" style="flex:1;">
+      </div>
+
+      <label style="margin-top:12px;">Collaborazione con</label>
+      <input type="text" id="collaborazione" placeholder="Es. NOE - Carabinieri">
 
       <label>Comune / Località</label>
       <input type="text" id="comune" placeholder="Es. Milano">
@@ -1126,7 +1140,7 @@ const CHECKLIST = {
 const WASTE_STATES = ["Non specificato","Al suolo","Interrato","Segni di combustione"];
 const SITE_CHARS  = ["Non specificata","Accessibilita' libera","Accessibilita' recintata"];
 const VOLUME_LEVELS = [
-  { id: 'L1', label: 'L1 — Ridotto (≤ 1 m³)',    short: 'Ridotto  < 1 m3',    color: '#2dbe6c' },
+  { id: 'L1', label: 'L1 — Ridotto (≤ 1 m³)',    short: 'Ridotto  ≤ 1 m3',    color: '#2dbe6c' },
   { id: 'L2', label: 'L2 — Medio (1-10 m³)',      short: 'Medio  1-10 m3',      color: '#f5a623' },
   { id: 'L3', label: 'L3 — Elevato (> 10 m³)',    short: 'Elevato  > 10 m3',    color: '#c0272d' },
 ];
@@ -1764,14 +1778,21 @@ function saveCurrentDetail() {
 }
 
 function salvaModificaMissione() {
-  const eq  = document.getElementById('equipaggio').value.trim();
-  const com = document.getElementById('comune').value.trim();
-  const dat = document.getElementById('data-missione').value;
-  const mat = document.getElementById('matricola').value.trim();
+  const q1   = document.getElementById('qualifica1').value.trim();
+  const n1   = document.getElementById('nome1').value.trim();
+  const q2   = document.getElementById('qualifica2').value.trim();
+  const n2   = document.getElementById('nome2').value.trim();
+  const collab = document.getElementById('collaborazione').value.trim();
+  const com  = document.getElementById('comune').value.trim();
+  const dat  = document.getElementById('data-missione').value;
+  const mat  = document.getElementById('matricola').value.trim();
+  const eq1  = [q1, n1].filter(Boolean).join(' ');
+  const eq2  = (q2 && q2 !== '—' && n2) ? [q2, n2].filter(Boolean).join(' ') : '';
 
   // Blocca i campi
-  ['equipaggio','comune','data-missione','matricola'].forEach(id => {
-    document.getElementById(id).classList.add('field-confirmed');
+  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('field-confirmed');
   });
 
   // Card diventa verde
@@ -1787,7 +1808,6 @@ function salvaModificaMissione() {
 
   // Costruisci riepilogo
   const dateFmt = dat ? (() => { const [y,m,d]=dat.split('-'); return `${d}/${m}/${y}`; })() : '—';
-  const lines = [eq||'—', com||'—', dateFmt, mat||'—'].filter(Boolean);
 
   // Banner animato
   const banner = document.createElement('div');
@@ -1795,8 +1815,9 @@ function salvaModificaMissione() {
   banner.innerHTML = `
     <div class="check-icon">✓</div>
     <div>
-      <div class="conf-text">${eq||'—'} · ${com||'—'}</div>
-      <div class="conf-sub">${dateFmt} · ${mat||'—'}</div>
+      <div class="conf-text">${eq1||'—'}${eq2 ? ' · '+eq2 : ''}</div>
+      <div class="conf-sub">${com||'—'} · ${dateFmt} · ${mat||'—'}</div>
+      ${collab ? `<div class="conf-sub" style="color:var(--amber)">Con: ${collab}</div>` : ''}
     </div>`;
   card.querySelector('.mt-12').replaceWith(banner);
 
@@ -1813,8 +1834,8 @@ function salvaModificaMissione() {
 
 function ripristinaMissione() {
   // Sblocca campi
-  ['equipaggio','comune','data-missione','matricola'].forEach(id => {
-    document.getElementById(id).classList.remove('field-confirmed');
+  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.classList.remove('field-confirmed');
   });
   const card = document.getElementById('card-missione');
   card.classList.remove('confermata');
@@ -1981,7 +2002,14 @@ function renderKMLMap() {
 async function generatePDF() {
   saveCurrentDetail();
 
-  const equipaggio = document.getElementById('equipaggio').value.trim() || '—';
+  const q1gen    = document.getElementById('qualifica1').value.trim();
+  const n1gen    = document.getElementById('nome1').value.trim();
+  const q2gen    = document.getElementById('qualifica2').value.trim();
+  const n2gen    = document.getElementById('nome2').value.trim();
+  const eq1gen   = [q1gen, n1gen].filter(Boolean).join(' ') || '—';
+  const eq2gen   = (q2gen && q2gen !== '—' && n2gen) ? [q2gen, n2gen].filter(Boolean).join(' ') : '';
+  const equipaggio = eq1gen; // compatibilità vecchio codice
+  const collaborazione = document.getElementById('collaborazione').value.trim();
   const comune     = document.getElementById('comune').value.trim() || '—';
   const dataVal    = document.getElementById('data-missione').value;
   const matricola  = document.getElementById('matricola').value.trim() || '—';
@@ -2013,7 +2041,7 @@ async function generatePDF() {
   const activePhotos = photos.filter(p => !p.scartata);
   if (!activePhotos.length) { toast('Nessuna foto attiva (tutte scartate?).', 'error'); return; }
 
-  const missione = { equipaggio, comune, dataStr, matricola, droneModel: '' };
+  const missione = { equipaggio, eq2: eq2gen, collaborazione, comune, dataStr, matricola, droneModel: '' };
   const sensori = { rgb: sensorRgb, term: sensorTerm, multi: sensorMult };
 
   try {
@@ -2124,65 +2152,111 @@ function sectionLabel(pdf, text, y) {
   return y + 8;
 }
 
-// Riga dati identificativi: card grigia 4 colonne + riga file
+// Riga dati identificativi: card grigia + riga file/collaborazione
 function drawInfoCard(pdf, y, missione, filename, idxNum, idxTot) {
-  const rowH1 = 16;   // altezza riga missione — uguale a GPS e rilievo
-  const rowH2 = 10;   // altezza riga file
+  // rowH1 con due sotto-righe per i due membri equipaggio
+  const hasEq2 = !!(missione.eq2 && missione.eq2.trim());
+  const rowH1 = hasEq2 ? 20 : 16;
+  const rowH2 = 10;
   const cardH = rowH1 + rowH2;
+
   pdfFill(pdf, COL_BG);
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.3);
   pdf.rect(MX, y, CW, cardH, 'FD');
-
-  // Linea divisoria orizzontale tra le due righe
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.22);
   pdf.line(MX, y + rowH1, MX + CW, y + rowH1);
 
-  // ── Riga 1: 5 colonne ──
-  const cols = [
-    ['EQUIPAGGIO',     missione.equipaggio],
+  // ── Riga 1: EQUIPAGGIO (2 righe se presenti) + COMUNE + DATA + DRONE + MATRICOLA ──
+  const otherCols = [
     ['COMUNE / LOC.',  missione.comune],
     ['DATA',           missione.dataStr],
     ['MODELLO DRONE',  missione.droneModel || 'N/D'],
     ['MATRICOLA',      missione.matricola],
   ];
-  const colW = CW / 5;
-  cols.forEach((c, i) => {
-    const cx = MX + i * colW + 3;
-    if (i > 0) {
-      pdfDraw(pdf, COL_LINE);
-      pdf.setLineWidth(0.22);
-      pdf.line(MX + i * colW, y + 2, MX + i * colW, y + rowH1 - 1);
-    }
+  // Colonna equipaggio: larghezza 1 slot, le altre 4 si dividono il resto
+  const eqColW = CW / 5;
+  const otherColW = (CW - eqColW) / 4;
+
+  // Equipaggio
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(6.2);
+  pdfRgb(pdf, COL_RED);
+  pdf.text('EQUIPAGGIO', MX + 3, y + 5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  pdfRgb(pdf, COL_INK);
+  pdf.text(String(missione.equipaggio || '—'), MX + 3, y + 10.5);
+  if (hasEq2) {
+    pdf.setFontSize(8);
+    pdf.text(String(missione.eq2), MX + 3, y + 16.5);
+  }
+
+  // Altre 4 colonne
+  otherCols.forEach((c, i) => {
+    const cx = MX + eqColW + i * otherColW + 3;
+    pdfDraw(pdf, COL_LINE);
+    pdf.setLineWidth(0.22);
+    pdf.line(MX + eqColW + i * otherColW, y + 2, MX + eqColW + i * otherColW, y + rowH1 - 1);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(6.2);
     pdfRgb(pdf, COL_RED);
-    pdf.text(c[0], cx, y + 5.5);
+    pdf.text(c[0], cx, y + 5);
     pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(8.5);
+    pdf.setFontSize(8);
     pdfRgb(pdf, COL_INK);
-    const val = pdf.splitTextToSize(String(c[1] || '—'), colW - 6);
-    pdf.text(val[0], cx, y + 12);
-    if (val[1]) { pdf.setFontSize(7); pdf.text(val[1], cx, y + 15.5); }
+    const val = pdf.splitTextToSize(String(c[1] || '—'), otherColW - 6);
+    pdf.text(val[0], cx, y + 10.5);
+    if (val[1] && hasEq2) { pdf.setFontSize(7); pdf.text(val[1], cx, y + 15); }
   });
 
-  // ── Riga 2: nome file esteso + contatore ──
+  // ── Riga 2: FILE (metà sinistra) + COLLABORAZIONE (metà destra, solo se valorizzata) ──
   const ry = y + rowH1;
+  const hasCollab = !!(missione.collaborazione && missione.collaborazione.trim());
+  const fileHalfW = hasCollab ? CW / 2 - 2 : CW - 14 - 22;
+
+  // FILE
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(6.2);
   pdfRgb(pdf, COL_RED);
   pdf.text('FILE', MX + 3, ry + 6.5);
   pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(7.5);
+  pdf.setFontSize(7);
   pdfRgb(pdf, COL_INK);
-  const fileAvailW = CW - 14 - 22;
-  const fileLines = pdf.splitTextToSize(filename || '—', fileAvailW);
+  const fileLines = pdf.splitTextToSize(filename || '—', fileHalfW - 14);
   pdf.text(fileLines[0], MX + 14, ry + 6.5);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(7.5);
-  pdfRgb(pdf, COL_GRAY);
-  pdf.text(`Foto ${idxNum} / ${idxTot}`, MX + CW - 3, ry + 6.5, { align: 'right' });
+
+  if (hasCollab) {
+    // Divisore verticale centrale
+    pdfDraw(pdf, COL_LINE);
+    pdf.setLineWidth(0.22);
+    pdf.line(MX + CW / 2, ry + 1.5, MX + CW / 2, ry + rowH2 - 1.5);
+    // COLLABORAZIONE
+    const cx2 = MX + CW / 2 + 3;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6.2);
+    pdfRgb(pdf, COL_RED);
+    pdf.text('COLLABORAZIONE CON', cx2, ry + 3.8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7.5);
+    pdfRgb(pdf, COL_INK);
+    const collabLines = pdf.splitTextToSize(missione.collaborazione, CW / 2 - 6);
+    pdf.text(collabLines[0], cx2, ry + 8.2);
+  } else {
+    // Contatore foto a destra (solo se no collaborazione)
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdfRgb(pdf, COL_GRAY);
+    pdf.text(`Foto ${idxNum} / ${idxTot}`, MX + CW - 3, ry + 6.5, { align: 'right' });
+  }
+  // Contatore foto sempre in fondo a destra se c'è collaborazione
+  if (hasCollab) {
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6);
+    pdfRgb(pdf, COL_GRAY);
+    pdf.text(`${idxNum}/${idxTot}`, MX + CW - 2, ry + 3.8, { align: 'right' });
+  }
 
   return y + cardH + 4;
 }
@@ -2521,7 +2595,7 @@ async function drawLastPage(pdf) {
           pdf.rect(soloEarthBtnX, btnY, soloEarthBtnW, 8, 'F');
           pdf.setFont('helvetica','normal'); pdf.setFontSize(8);
           pdfRgb(pdf, COL_WHITE);
-          pdf.text('Apri traccia in Google Earth', PAGE_W/2, btnY + 5.2, { align:'center' });
+          pdf.text('Mostra Ares in Google Earth', PAGE_W/2, btnY + 5.2, { align:'center' });
           pdf.link(soloEarthBtnX, btnY, soloEarthBtnW, 8, { url: earthUrl });
           y = btnY + 14;
         } else {
