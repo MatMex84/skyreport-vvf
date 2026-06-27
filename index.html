@@ -1013,6 +1013,9 @@
       <label>Matricola Drone</label>
       <input type="text" id="matricola" placeholder="Es. VfC131">
 
+      <label>Scheda Intervento <span style="color:var(--red);font-size:11px;">*</span></label>
+      <input type="text" id="scheda-intervento" placeholder="Es. 2024/0123">
+
       <div class="mt-12">
         <button class="btn btn-secondary btn-full" onclick="salvaModificaMissione()">
           ✓ Conferma dati
@@ -1140,7 +1143,7 @@ const CHECKLIST = {
 const WASTE_STATES = ["Non specificato","Al suolo","Interrato","Segni di combustione"];
 const SITE_CHARS  = ["Non specificata","Accessibilita' libera","Accessibilita' recintata"];
 const VOLUME_LEVELS = [
-  { id: 'L1', label: 'L1 — Ridotto (≤ 1 m³)',    short: 'Ridotto  ≤ 1 m3',    color: '#2dbe6c' },
+  { id: 'L1', label: 'L1 — Ridotto (< 1 m³)',    short: 'Ridotto  < 1 m3',    color: '#2dbe6c' },
   { id: 'L2', label: 'L2 — Medio (1-10 m³)',      short: 'Medio  1-10 m3',      color: '#f5a623' },
   { id: 'L3', label: 'L3 — Elevato (> 10 m³)',    short: 'Elevato  > 10 m3',    color: '#c0272d' },
 ];
@@ -1284,12 +1287,22 @@ async function handlePhotoFiles(files) {
         skipped++;
         return;
       }
-      let lat = 'N/D', lon = 'N/D', altASL = 'N/D', altAGL = 'N/D', droneModel = 'N/D';
+      let lat = 'N/D', lon = 'N/D', altASL = 'N/D', altAGL = 'N/D', droneModel = 'N/D', oraScatto = '';
       try {
         const gps = await exifr.gps(file);
         if (gps) { lat = gps.latitude.toFixed(6); lon = gps.longitude.toFixed(6); }
         const all = await exifr.parse(file, { gps: true, xmp: true, tiff: true });
         if (all && all.GPSAltitude != null) altASL = all.GPSAltitude.toFixed(2) + ' m';
+        // Orario di scatto (EXIF DateTimeOriginal)
+        const dt = all && (all.DateTimeOriginal || all.CreateDate || all.DateTime);
+        if (dt) {
+          const d = (dt instanceof Date) ? dt : new Date(dt);
+          if (!isNaN(d.getTime())) {
+            oraScatto = String(d.getHours()).padStart(2,'0') + ':' +
+                        String(d.getMinutes()).padStart(2,'0') + ':' +
+                        String(d.getSeconds()).padStart(2,'0');
+          }
+        }
         // RelativeAltitude = quota AGL (dal punto di decollo), tag XMP DJI
         if (all && all.RelativeAltitude != null) {
           const agl = parseFloat(all.RelativeAltitude);
@@ -1304,7 +1317,7 @@ async function handlePhotoFiles(files) {
 
       const dataURL = await readFileAsDataURL(file);
 
-      photos.push({ file, dataURL, lat, lon, altASL, altAGL, droneModel, scartata: false,
+      photos.push({ file, dataURL, lat, lon, altASL, altAGL, droneModel, oraScatto, scartata: false,
         entry: { checklist: [], altro: '', noteOperative: '', wasteState: WASTE_STATES[1], siteChar: SITE_CHARS[1], volumeLevel: '' }
       });
       loaded++;
@@ -1409,6 +1422,9 @@ function closeSidebarOnMobile() {
   }
 }
 
+// ════════════════════════════════════════════
+//  MODAL CONFERMA CARTELLA
+// ════════════════════════════════════════════
 function renderPhotoGrid() {
   const grid = document.getElementById('photo-grid');
   grid.innerHTML = '';
@@ -1786,11 +1802,19 @@ function salvaModificaMissione() {
   const com  = document.getElementById('comune').value.trim();
   const dat  = document.getElementById('data-missione').value;
   const mat  = document.getElementById('matricola').value.trim();
+  const scheda = document.getElementById('scheda-intervento').value.trim();
   const eq1  = [q1, n1].filter(Boolean).join(' ');
   const eq2  = (q2 && q2 !== '—' && n2) ? [q2, n2].filter(Boolean).join(' ') : '';
 
+  // Validazione Scheda Intervento obbligatoria
+  if (!scheda) {
+    toast('⚠ Inserisci il numero di Scheda Intervento.', 'error');
+    document.getElementById('scheda-intervento').focus();
+    return;
+  }
+
   // Blocca i campi
-  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola'].forEach(id => {
+  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola','scheda-intervento'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('field-confirmed');
   });
@@ -1817,6 +1841,7 @@ function salvaModificaMissione() {
     <div>
       <div class="conf-text">${eq1||'—'}${eq2 ? ' · '+eq2 : ''}</div>
       <div class="conf-sub">${com||'—'} · ${dateFmt} · ${mat||'—'}</div>
+      <div class="conf-sub" style="color:var(--blue)">Scheda: ${scheda}</div>
       ${collab ? `<div class="conf-sub" style="color:var(--amber)">Con: ${collab}</div>` : ''}
     </div>`;
   card.querySelector('.mt-12').replaceWith(banner);
@@ -1834,7 +1859,7 @@ function salvaModificaMissione() {
 
 function ripristinaMissione() {
   // Sblocca campi
-  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola'].forEach(id => {
+  ['qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola','scheda-intervento'].forEach(id => {
     const el = document.getElementById(id); if (el) el.classList.remove('field-confirmed');
   });
   const card = document.getElementById('card-missione');
@@ -2013,6 +2038,7 @@ async function generatePDF() {
   const comune     = document.getElementById('comune').value.trim() || '—';
   const dataVal    = document.getElementById('data-missione').value;
   const matricola  = document.getElementById('matricola').value.trim() || '—';
+  const schedaIntervento = document.getElementById('scheda-intervento').value.trim() || '—';
   const dataStr    = dataVal ? formatDate(dataVal) : '—';
   const sensorRgb  = document.getElementById('s-rgb').checked;
   const sensorTerm = document.getElementById('s-term').checked;
@@ -2038,10 +2064,26 @@ async function generatePDF() {
 
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+  // Disattiva l'evidenziazione (highlight box) dei link: aggiunge /H /N
+  // alle annotazioni /Link. Patch sicura per l'xref perché interviene
+  // sulla stringa prima della scrittura nel buffer.
+  (function patchLinkHighlight(doc) {
+    const _w = doc.internal.write;
+    doc.internal.write = function() {
+      let s = (arguments.length === 1 && typeof arguments[0] === 'string')
+        ? arguments[0]
+        : Array.prototype.join.call(arguments, ' ');
+      if (s.indexOf('/Subtype /Link') !== -1) {
+        s = s.replace(/\/Subtype \/Link /g, '/Subtype /Link /H /N ');
+      }
+      return _w.call(this, s);
+    };
+  })(pdf);
   const activePhotos = photos.filter(p => !p.scartata);
   if (!activePhotos.length) { toast('Nessuna foto attiva (tutte scartate?).', 'error'); return; }
 
-  const missione = { equipaggio, eq2: eq2gen, collaborazione, comune, dataStr, matricola, droneModel: '' };
+  const missione = { equipaggio, eq2: eq2gen, collaborazione, comune, dataStr, matricola, schedaIntervento, droneModel: '' };
   const sensori = { rgb: sensorRgb, term: sensorTerm, multi: sensorMult };
 
   try {
@@ -2059,8 +2101,7 @@ async function generatePDF() {
     if (kmlFiles.length) {
       setProgress(88, 'Aggiunta mappa tracce…');
       pdf.addPage();
-      drawPageFrame(pdf, 'VERBALE TECNICO OPERATIVO', 'Tracciato di volo SAPR');
-      await drawLastPage(pdf);
+      await drawLastPage(pdf, missione);
     }
 
     setProgress(98, 'Salvataggio PDF…');
@@ -2100,37 +2141,60 @@ const COL_GRAY  = [110, 118, 132];
 const COL_LINE  = [218, 222, 230];
 const COL_BG    = [247, 248, 250];
 const COL_WHITE = [255, 255, 255];
+const COL_BAR   = [38, 42, 52];
+const COL_REDB  = [224, 70, 76];
 
 const PAGE_W = 210, PAGE_H = 297, MX = 14; // margini
 const CW = PAGE_W - MX * 2;                 // larghezza contenuto = 182
 
-// Intestazione di pagina: sfondo chiaro, testo rosso, logo a sinistra
-function drawPageFrame(pdf, title, subtitle) {
-  const headH = 28;
+// Intestazione di pagina: logo+testo a sinistra, blocco Scheda a destra
+function drawPageFrame(pdf, title, subtitle, schedaIntervento) {
+  const headH = 30;
 
   // Logo a sinistra
   try {
-    pdf.addImage(LOGO_DATA_URL, 'PNG', MX, 4, 20, 20, 'logo_sapr', 'NONE');
+    pdf.addImage(LOGO_DATA_URL, 'PNG', MX, 3, 22, 22, 'logo_sapr', 'NONE');
   } catch(e) {}
 
-  // Titolo centrale ente (rosso, come da intestazione ufficiale)
+  // Testo ente — allineato a sinistra, accanto al logo
+  const textX = MX + 25;
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(17);
+  pdf.setFontSize(14);
   pdfRgb(pdf, COL_RED);
-  pdf.text('NUCLEO SAPR — VIGILI DEL FUOCO', PAGE_W / 2, 13, { align: 'center' });
-
-  // Sottotitolo / sezione
+  pdf.text('NUCLEO SAPR', textX, 10);
+  pdf.setFontSize(10);
+  pdfRgb(pdf, COL_INK);
+  pdf.text('VIGILI DEL FUOCO', textX, 16);
   pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(11);
+  pdf.setFontSize(8);
   pdfRgb(pdf, COL_GRAY);
-  pdf.text(subtitle || title, PAGE_W / 2, 20.5, { align: 'center' });
+  pdf.text(subtitle || title, textX, 21.5);
+
+  // Blocco "Scheda di Intervento" — allineato a destra, compatto, testo a sx
+  if (schedaIntervento && schedaIntervento !== '—') {
+    const blkW = 42, blkH = 14, blkX = PAGE_W - MX - blkW, blkY = 5;
+    pdfDraw(pdf, COL_LINE);
+    pdf.setLineWidth(0.3);
+    pdf.rect(blkX, blkY, blkW, blkH, 'D');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6.2);
+    pdfRgb(pdf, COL_RED);
+    pdf.text('SCHEDA DI INTERVENTO', blkX + 3, blkY + 4.2);
+    pdfDraw(pdf, COL_LINE);
+    pdf.setLineWidth(0.22);
+    pdf.line(blkX + 3, blkY + 6, blkX + blkW - 3, blkY + 6);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdfRgb(pdf, COL_INK);
+    pdf.text(schedaIntervento, blkX + 3, blkY + 11);
+  }
 
   // Linea rossa di separazione
   pdfDraw(pdf, COL_RED);
   pdf.setLineWidth(0.7);
   pdf.line(MX, headH, PAGE_W - MX, headH);
 
-  // Footer (riferimento normativo, NESSUN copyright nel PDF)
+  // Footer
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.3);
   pdf.line(MX, PAGE_H - 12, PAGE_W - MX, PAGE_H - 12);
@@ -2152,71 +2216,59 @@ function sectionLabel(pdf, text, y) {
   return y + 8;
 }
 
-// Riga dati identificativi: card grigia + riga file/collaborazione
+// Riga dati identificativi: bordo sottile, nessuno sfondo grigio
 function drawInfoCard(pdf, y, missione, filename, idxNum, idxTot) {
-  // rowH1 con due sotto-righe per i due membri equipaggio
   const hasEq2 = !!(missione.eq2 && missione.eq2.trim());
-  const rowH1 = hasEq2 ? 20 : 16;
-  const rowH2 = 10;
-  const cardH = rowH1 + rowH2;
+  const hasCollab = !!(missione.collaborazione && missione.collaborazione.trim());
 
-  pdfFill(pdf, COL_BG);
+  // Riga 1: 5 colonne — EQUIPAGGIO | COMUNE | DATA | DRONE | MATRICOLA
+  const row1H = hasEq2 ? 20 : 16;
+  const cols1 = [
+    { label: 'EQUIPAGGIO',    value: missione.equipaggio || '—', extra: hasEq2 ? missione.eq2 : null },
+    { label: 'COMUNE / LOC.', value: missione.comune || '—' },
+    { label: 'DATA',          value: missione.dataStr || '—' },
+    { label: 'MODELLO DRONE', value: missione.droneModel || 'N/D' },
+    { label: 'MATRICOLA',     value: missione.matricola || '—' },
+  ];
+  const colW1 = CW / cols1.length;
+
+  // Disegno riga 1: solo bordo esterno e separatori verticali
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.3);
-  pdf.rect(MX, y, CW, cardH, 'FD');
-  pdfDraw(pdf, COL_LINE);
-  pdf.setLineWidth(0.22);
-  pdf.line(MX, y + rowH1, MX + CW, y + rowH1);
+  pdf.rect(MX, y, CW, row1H, 'D');
 
-  // ── Riga 1: EQUIPAGGIO (2 righe se presenti) + COMUNE + DATA + DRONE + MATRICOLA ──
-  const otherCols = [
-    ['COMUNE / LOC.',  missione.comune],
-    ['DATA',           missione.dataStr],
-    ['MODELLO DRONE',  missione.droneModel || 'N/D'],
-    ['MATRICOLA',      missione.matricola],
-  ];
-  // Colonna equipaggio: larghezza 1 slot, le altre 4 si dividono il resto
-  const eqColW = CW / 5;
-  const otherColW = (CW - eqColW) / 4;
-
-  // Equipaggio
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(6.2);
-  pdfRgb(pdf, COL_RED);
-  pdf.text('EQUIPAGGIO', MX + 3, y + 5);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(8);
-  pdfRgb(pdf, COL_INK);
-  pdf.text(String(missione.equipaggio || '—'), MX + 3, y + 10.5);
-  if (hasEq2) {
-    pdf.setFontSize(8);
-    pdf.text(String(missione.eq2), MX + 3, y + 16.5);
-  }
-
-  // Altre 4 colonne
-  otherCols.forEach((c, i) => {
-    const cx = MX + eqColW + i * otherColW + 3;
-    pdfDraw(pdf, COL_LINE);
-    pdf.setLineWidth(0.22);
-    pdf.line(MX + eqColW + i * otherColW, y + 2, MX + eqColW + i * otherColW, y + rowH1 - 1);
+  cols1.forEach((c, i) => {
+    const cx = MX + i * colW1;
+    if (i > 0) {
+      pdf.setLineWidth(0.22);
+      pdf.line(cx, y + 2, cx, y + row1H - 2);
+    }
+    const tx = cx + 3;
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(6.2);
     pdfRgb(pdf, COL_RED);
-    pdf.text(c[0], cx, y + 5);
+    pdf.text(c.label, tx, y + 5);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8);
     pdfRgb(pdf, COL_INK);
-    const val = pdf.splitTextToSize(String(c[1] || '—'), otherColW - 6);
-    pdf.text(val[0], cx, y + 10.5);
-    if (val[1] && hasEq2) { pdf.setFontSize(7); pdf.text(val[1], cx, y + 15); }
+    const wrap = pdf.splitTextToSize(String(c.value), colW1 - 6);
+    pdf.text(wrap[0], tx, y + 10.5);
+    if (c.extra) {
+      pdf.setFontSize(7.5);
+      pdf.text(String(c.extra), tx, y + 16.5);
+    }
   });
 
-  // ── Riga 2: FILE (metà sinistra) + COLLABORAZIONE (metà destra, solo se valorizzata) ──
-  const ry = y + rowH1;
-  const hasCollab = !!(missione.collaborazione && missione.collaborazione.trim());
-  const fileHalfW = hasCollab ? CW / 2 - 2 : CW - 14 - 22;
+  // Riga 2: FILE | [COLLABORAZIONE] | foto N/Ntot
+  const row2H = 10;
+  const ry = y + row1H;
+
+  pdfDraw(pdf, COL_LINE);
+  pdf.setLineWidth(0.3);
+  pdf.rect(MX, ry, CW, row2H, 'D');
 
   // FILE
+  const fileColW = hasCollab ? CW / 2 : CW * 0.7;
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(6.2);
   pdfRgb(pdf, COL_RED);
@@ -2224,41 +2276,35 @@ function drawInfoCard(pdf, y, missione, filename, idxNum, idxTot) {
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(7);
   pdfRgb(pdf, COL_INK);
-  const fileLines = pdf.splitTextToSize(filename || '—', fileHalfW - 14);
+  const fileLines = pdf.splitTextToSize(filename || '—', fileColW - 18);
   pdf.text(fileLines[0], MX + 14, ry + 6.5);
 
   if (hasCollab) {
-    // Divisore verticale centrale
-    pdfDraw(pdf, COL_LINE);
+    const cx2 = MX + CW / 2;
     pdf.setLineWidth(0.22);
-    pdf.line(MX + CW / 2, ry + 1.5, MX + CW / 2, ry + rowH2 - 1.5);
-    // COLLABORAZIONE
-    const cx2 = MX + CW / 2 + 3;
+    pdf.line(cx2, ry + 1.5, cx2, ry + row2H - 1.5);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(6.2);
     pdfRgb(pdf, COL_RED);
-    pdf.text('COLLABORAZIONE CON', cx2, ry + 3.8);
+    pdf.text('COLLABORAZIONE CON', cx2 + 3, ry + 3.8);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(7.5);
     pdfRgb(pdf, COL_INK);
-    const collabLines = pdf.splitTextToSize(missione.collaborazione, CW / 2 - 6);
-    pdf.text(collabLines[0], cx2, ry + 8.2);
+    const cl = pdf.splitTextToSize(missione.collaborazione, CW / 2 - 6);
+    pdf.text(cl[0], cx2 + 3, ry + 8.2);
+    // contatore foto in alto a destra
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(6);
+    pdfRgb(pdf, COL_GRAY);
+    pdf.text(`${idxNum}/${idxTot}`, MX + CW - 2, ry + 3.8, { align: 'right' });
   } else {
-    // Contatore foto a destra (solo se no collaborazione)
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(7.5);
     pdfRgb(pdf, COL_GRAY);
     pdf.text(`Foto ${idxNum} / ${idxTot}`, MX + CW - 3, ry + 6.5, { align: 'right' });
   }
-  // Contatore foto sempre in fondo a destra se c'è collaborazione
-  if (hasCollab) {
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(6);
-    pdfRgb(pdf, COL_GRAY);
-    pdf.text(`${idxNum}/${idxTot}`, MX + CW - 2, ry + 3.8, { align: 'right' });
-  }
 
-  return y + cardH + 4;
+  return y + row1H + row2H + 4;
 }
 
 // Chip arrotondato per le voci selezionate
@@ -2268,11 +2314,10 @@ function drawChip(pdf, text, x, y, accent) {
   const tw = pdf.getTextWidth(text);
   const padX = 4, h = 6.6;
   const w = tw + padX * 2 + 3.5;
-  // sfondo uguale per tutti i chip (nessuna distinzione Altro)
-  pdfFill(pdf, COL_BG);
+  // solo bordo, nessuno sfondo
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.3);
-  pdf.rect(x, y, w, h, 'FD');
+  pdf.rect(x, y, w, h, 'D');
   // pallino rosso
   pdfFill(pdf, COL_RED);
   pdf.circle(x + 3, y + h / 2, 0.9, 'F');
@@ -2283,7 +2328,7 @@ function drawChip(pdf, text, x, y, accent) {
 }
 
 async function drawPhotoPage(pdf, p, missione, sensori, idxNum, idxTot) {
-  drawPageFrame(pdf, 'DOCUMENTAZIONE FOTOGRAFICA', 'Rapporto Tecnico di Rilevamento Ambientale e Illeciti');
+  drawPageFrame(pdf, 'DOCUMENTAZIONE FOTOGRAFICA', 'Rapporto Tecnico di Rilevamento Ambientale e Illeciti', missione.schedaIntervento);
 
   let y = 33;
 
@@ -2334,46 +2379,47 @@ async function drawPhotoPage(pdf, p, missione, sensori, idxNum, idxTot) {
     pdf.rect(MX, imgY, CW, imgH, 'D');
   }
 
-  y = imgY + imgH + 3;
+  // ── Barra didascalia scura, agganciata sotto la foto ──
+  const barH = 7.5;
+  const barY = imgY + imgH;
+  pdfFill(pdf, COL_BAR);
+  pdf.rect(MX, barY, CW, barH, 'F');
 
-  // ── GPS: riga testo compatta sotto la foto, senza box ──
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(7);
-  pdfRgb(pdf, COL_GRAY);
-  const gpsItems = [
-    `LAT ${p.lat}`,
-    `LON ${p.lon}`,
-    `ASL ${p.altASL}`,
-    `AGL ${p.altAGL}`,
-  ];
-  const gpsLineY = y + 4;
-  const colW4 = CW / 4;
-  gpsItems.forEach((txt, i) => {
-    pdf.text(txt, MX + i * colW4, gpsLineY);
-  });
-  // Linea separatrice leggera
-  pdfDraw(pdf, COL_LINE);
-  pdf.setLineWidth(0.2);
-  pdf.line(MX, y + 6.5, PAGE_W - MX, y + 6.5);
-  y += 11;
-
-  // Pulsante Google Earth per ogni foto (se GPS disponibile)
-  if (p.lat !== 'N/D' && p.lon !== 'N/D') {
-    const earthPhotoUrl = `https://earth.google.com/web/search/${p.lat},${p.lon}/@${p.lat},${p.lon},0a,300d,35y,0h,0t,0r`;
-    const eBtnW = 80;
-    const eBtnX = (PAGE_W - eBtnW) / 2;
-    const eBtnH = 6.5;
-    pdfFill(pdf, [120, 125, 135]);
-    pdf.rect(eBtnX, y, eBtnW, eBtnH, 'F');
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(7);
-    pdfRgb(pdf, COL_WHITE);
-    pdf.text('Apri in Google Earth', PAGE_W / 2, y + 4.3, { align: 'center' });
-    pdf.link(eBtnX, y, eBtnW, eBtnH, { url: earthPhotoUrl });
-    y += 10;
-  } else {
-    y += 1;
+  // Testo coordinate a sinistra (bianco)
+  const hasGPS = (p.lat !== 'N/D' && p.lon !== 'N/D');
+  const capParts = [];
+  if (hasGPS) {
+    capParts.push(`Lat ${p.lat}`);
+    capParts.push(`Lon ${p.lon}`);
   }
+  if (p.altASL && p.altASL !== 'N/D') capParts.push(`ASL ${p.altASL}`);
+  if (p.altAGL && p.altAGL !== 'N/D') capParts.push(`AGL ${p.altAGL}`);
+  const capTxt = capParts.join('   ') || 'Coordinate non disponibili';
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdfRgb(pdf, COL_WHITE);
+  pdf.text(capTxt, MX + 3, barY + 5);
+
+  // "Apri in Google Earth" a destra — link sottolineato, hitbox aderente
+  if (hasGPS) {
+    const earthPhotoUrl = `https://earth.google.com/web/search/${p.lat},${p.lon}/@${p.lat},${p.lon},0a,300d,35y,0h,0t,0r`;
+    const linkTxt = 'Apri in Google Earth';
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdfRgb(pdf, COL_REDB);
+    const ltw = pdf.getTextWidth(linkTxt);
+    const lx = MX + CW - 3 - ltw;
+    const lbase = barY + 5;
+    pdf.text(linkTxt, lx, lbase);
+    // sottolineatura
+    pdfDraw(pdf, COL_REDB);
+    pdf.setLineWidth(0.3);
+    pdf.line(lx, lbase + 1, lx + ltw, lbase + 1);
+    pdf.link(lx, barY + 1.5, ltw, barH - 3, { url: earthPhotoUrl });
+  }
+
+  y = barY + barH + 6;
 
   // ── Rilievo tecnico: box identico alla info card ──
   const sensTxt = [
@@ -2392,10 +2438,9 @@ async function drawPhotoPage(pdf, p, missione, sensori, idxNum, idxTot) {
   y = sectionLabel(pdf, 'Rilievo tecnico', y);
   const rilievoH = 16;
   const rilievoW = CW / 4;
-  pdfFill(pdf, COL_BG);
   pdfDraw(pdf, COL_LINE);
   pdf.setLineWidth(0.3);
-  pdf.rect(MX, y, CW, rilievoH, 'FD');
+  pdf.rect(MX, y, CW, rilievoH, 'D');
   [['SENSORE', sensTxt, null], ['STATO RIFIUTI', wasteTxt, null], ['ACCESSIBILITA\'', accTxt, null], ['VOLUME STIMATO', volTxt, volColor]].forEach((t, i) => {
     const tx = MX + i * rilievoW;
     if (i > 0) {
@@ -2559,10 +2604,11 @@ async function buildMapCanvas(kmlFilesArr) {
   return canvas;
 }
 
-async function drawLastPage(pdf) {
+async function drawLastPage(pdf, missione) {
   let y = 33;
   y = sectionLabel(pdf, 'Rotta tracciata', y);
   y += 1;
+  drawPageFrame(pdf, 'VERBALE TECNICO OPERATIVO', 'Tracciato di volo SAPR', missione ? missione.schedaIntervento : '—');
 
   if (kmlFiles.length > 0) {
     try {
@@ -2582,28 +2628,24 @@ async function drawLastPage(pdf) {
           const cLat = allPts.reduce((s,p)=>s+p[0],0)/allPts.length;
           const cLon = allPts.reduce((s,p)=>s+p[1],0)/allPts.length;
           const mapsUrl = `https://www.google.com/maps?q=${cLat.toFixed(6)},${cLon.toFixed(6)}`;
-          const earthUrl = `https://earth.google.com/web/@${cLat.toFixed(6)},${cLon.toFixed(6)},500a,800d,35y,0h,45t,0r`;
-          const btnY = y + mapH + 5;
-          const btnW = 85;
-          const gap = 6;
-          const totalW = btnW * 2 + gap;
-          const btn1X = (PAGE_W - totalW) / 2;
-          const btn2X = btn1X + btnW + gap;
-          const soloEarthBtnW = 88;
-          const soloEarthBtnX = (PAGE_W - soloEarthBtnW) / 2;
-          pdfFill(pdf, [120, 125, 135]);
-          pdf.rect(soloEarthBtnX, btnY, soloEarthBtnW, 8, 'F');
-          pdf.setFont('helvetica','normal'); pdf.setFontSize(8);
-          pdfRgb(pdf, COL_WHITE);
-          pdf.text('Mostra Ares in Google Earth', PAGE_W/2, btnY + 5.2, { align:'center' });
-          pdf.link(soloEarthBtnX, btnY, soloEarthBtnW, 8, { url: earthUrl });
-          y = btnY + 14;
+          const earthUrl = `https://earth.google.com/web/search/${cLat.toFixed(6)},${cLon.toFixed(6)}/@${cLat.toFixed(6)},${cLon.toFixed(6)},0a,800d,35y,0h,0t,0r`;
+          const btnY = y + mapH + 6;
+          const linkTxt = 'Mostra Area in Google Earth';
+          pdf.setFont('helvetica','bold'); pdf.setFontSize(8.5);
+          pdfRgb(pdf, COL_REDB);
+          const ltw = pdf.getTextWidth(linkTxt);
+          const lx = (PAGE_W - ltw) / 2;
+          pdf.text(linkTxt, lx, btnY);
+          pdfDraw(pdf, COL_REDB);
+          pdf.setLineWidth(0.3);
+          pdf.line(lx, btnY + 1.2, lx + ltw, btnY + 1.2);
+          pdf.link(lx, btnY - 3.5, ltw, 6, { url: earthUrl });
+          y = btnY + 10;
         } else {
           y += mapH + 8;
         }
 
-        // Legenda
-        y = sectionLabel(pdf, 'Legenda tracce', y);
+        // Legenda tracce (senza etichetta di sezione)
         kmlFiles.forEach(kf => {
           const rgb = hexToRgb(kf.color);
           pdfFill(pdf, rgb);
