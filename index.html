@@ -11,6 +11,7 @@
 
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- Leaflet per mappa KML -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -253,8 +254,8 @@
   /* ── PHOTO GRID ── */
   .photo-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
   }
   .photo-card {
     background: var(--bg3);
@@ -269,26 +270,26 @@
   .photo-card.done { border-color: var(--green); }
   .photo-thumb {
     width: 100%;
-    height: 160px;
+    height: 90px;
     object-fit: cover;
     display: block;
     background: var(--bg4);
   }
   .photo-info {
-    padding: 10px 12px;
+    padding: 6px 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
   }
   .photo-name {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--text2);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 160px;
+    max-width: 100px;
   }
   .photo-badge {
     font-size: 10px;
@@ -346,7 +347,7 @@
   }
   .detail-img-col img {
     width: 100%;
-    max-height: 480px;
+    max-height: 640px;
     object-fit: contain;
     background: #000;
     display: block;
@@ -661,7 +662,7 @@
   .img-lens-wrap.lens-off { cursor: default; }
   .img-lens-wrap #detail-img {
     width: 100%;
-    max-height: 480px;
+    max-height: 640px;
     object-fit: contain;
     background: #000;
     display: block;
@@ -670,8 +671,8 @@
   .lens-glass {
     display: none;
     position: absolute;
-    width: 280px;
-    height: 180px;
+    width: 340px;
+    height: 220px;
     border-radius: 6px;
     border: 2px solid rgba(192,39,45,.9);
     box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 4px 20px rgba(0,0,0,.5);
@@ -811,6 +812,9 @@
     /* Rendi il pulsante Genera PDF più compatto */
     #btn-genera { padding: 6px 12px !important; font-size: 12px !important; }
     #btn-genera-text::before { content: ''; margin-right: 4px; }
+    /* Salva/Carica: solo icona su mobile */
+    #btn-salva-sessione, #btn-carica-sessione { padding: 6px 10px !important; font-size: 12px !important; }
+    #btn-salva-text, #btn-carica-text { display: none; }
 
     /* Hamburger visibile */
     #sidebar-toggle { display: flex !important; }
@@ -902,6 +906,8 @@
   /* ── Smartphone piccolo (≤ 400px) ── */
   @media (max-width: 400px) {
     .header-title { font-size: 14px; letter-spacing: 0; }
+    .header-right { gap: 6px !important; }
+    #btn-salva-sessione, #btn-carica-sessione { padding: 6px 8px !important; }
     #btn-genera span[id="btn-genera-text"] { display: none; }
     #btn-genera::after { content: 'PDF'; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px; }
   }
@@ -960,6 +966,13 @@
   <img id="header-logo" alt="Logo SAPR" style="height:46px;width:46px;border-radius:50%;flex-shrink:0;">
   <div class="header-title">Sky<span>Report</span> VVF</div>
   <div class="header-right" style="display:flex;align-items:center;gap:14px;">
+    <input type="file" id="session-load-input" accept=".json" style="display:none" onchange="loadSessionFile(this.files[0])">
+    <button class="btn btn-secondary" id="btn-carica-sessione" onclick="document.getElementById('session-load-input').click()" title="Carica una sessione salvata in precedenza" style="padding:7px 14px;font-size:13px;white-space:nowrap;">
+      📂 <span id="btn-carica-text">Carica</span>
+    </button>
+    <button class="btn btn-secondary" id="btn-salva-sessione" onclick="saveSession()" title="Salva lo stato attuale (dati missione, foto compilate, tracce) in un file da riprendere in seguito" style="padding:7px 14px;font-size:13px;white-space:nowrap;">
+      💾 <span id="btn-salva-text">Salva</span>
+    </button>
     <button class="btn btn-primary" id="btn-genera" onclick="generatePDF()" disabled style="padding:7px 18px;font-size:13px;white-space:nowrap;">
       <span class="spinner" id="gen-spinner"></span>
       <span id="btn-genera-text">Genera PDF</span>
@@ -993,13 +1006,13 @@
       <label>Equipaggio</label>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
         <select id="qualifica1" style="width:72px;flex-shrink:0;">
-          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VP</option>
+          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VF</option>
         </select>
         <input type="text" id="nome1" placeholder="Cognome Nome" style="flex:1;">
       </div>
       <div style="display:flex;gap:6px;align-items:center;">
         <select id="qualifica2" style="width:72px;flex-shrink:0;">          
-          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VP</option>
+          <option>IA</option><option>CR</option><option>CS</option><option>VC</option><option>VE</option><option>VF</option>
         </select>
         <input type="text" id="nome2" placeholder="Cognome Nome" style="flex:1;">
       </div>
@@ -1141,7 +1154,7 @@
 
     <div class="drop-zone" id="photo-drop">
       <!-- input FILE (foto + kml/gpx singoli, nessuna cartella) -->
-      <input type="file" id="photo-input" accept="image/jpeg,image/png,.kml,.gpx,.KML,.GPX" multiple onchange="handleMissionFiles(this.files)" style="display:none">
+      <input type="file" id="photo-input" accept="image/jpeg,image/png,.kml,.gpx,.kmz,.KML,.GPX,.KMZ" multiple onchange="handleMissionFiles(this.files)" style="display:none">
       <!-- input CARTELLA -->
       <input type="file" id="folder-input" webkitdirectory multiple onchange="handleMissionFiles(this.files)" style="display:none">
       <div class="drop-icon">📸</div>
@@ -1162,6 +1175,7 @@
         <div class="detail-header-name" id="detail-filename">—</div>
         <div class="flex-gap">
           <button class="btn btn-secondary" id="btn-lente" onclick="toggleLente()" title="Attiva lente di ingrandimento">🔍 Lente</button>
+          <button class="btn btn-secondary" onclick="cicleZoomLente()" title="Aumenta zoom lente">🔍+</button>
           <button class="btn btn-secondary" onclick="prevPhoto()">← Prec.</button>
           <button class="btn btn-secondary" onclick="nextPhoto()">Succ. →</button>
           <button class="btn btn-secondary" onclick="closeDetail()">✕ Chiudi</button>
@@ -1306,7 +1320,7 @@ async function handleEntries(entries) {
       const name = file.name.toLowerCase();
       if (['.jpg','.jpeg','.png'].some(e => name.endsWith(e))) {
         photoFiles.push(file);
-      } else if (['.kml','.gpx'].some(e => name.endsWith(e))) {
+      } else if (['.kml','.gpx','.kmz'].some(e => name.endsWith(e))) {
         trackFiles.push(file);
       }
     } else if (entry.isDirectory) {
@@ -1342,10 +1356,10 @@ async function handleEntries(entries) {
 async function handleMissionFiles(files) {
   const arr = Array.from(files);
   const photos = arr.filter(f => /\.(jpe?g|png)$/i.test(f.name));
-  const tracks = arr.filter(f => /\.(kml|gpx)$/i.test(f.name));
+  const tracks = arr.filter(f => /\.(kml|gpx|kmz)$/i.test(f.name));
   if (tracks.length) await handleKMLFiles(tracks, true);
   if (photos.length) await handlePhotoFiles(photos);
-  if (!photos.length && !tracks.length) toast('Nessun file riconosciuto (JPG/PNG/KML/GPX).', 'error');
+  if (!photos.length && !tracks.length) toast('Nessun file riconosciuto (JPG/PNG/KML/GPX/KMZ).', 'error');
 }
 
 async function handlePhotoFiles(files) {
@@ -1412,6 +1426,8 @@ async function handlePhotoFiles(files) {
     updateStepDot(2, 'done');
     autofillOrarioVolo();
   }
+  // Se c'è una sessione in attesa, riabbina i dati compilati alle foto appena caricate
+  if (pendingSession) applyPendingSession();
 }
 
 // Aggiorna il banner riepilogo sotto la drop zone
@@ -1553,16 +1569,27 @@ function toggleScarta(idx) {
 // ════════════════════════════════════════════
 const LENS_ZOOM = 3; // zoom predefinito fisso
 let lenteOn = false;
+const LENS_LEVELS = [3, 6, 10]; // livelli di zoom disponibili, ciclabili
+let lensLevelIdx = 0;
 
 function toggleLente() {
   lenteOn = !lenteOn;
+  lensLevelIdx = 0;
   const wrap = document.getElementById('img-lens-wrap');
   const btn  = document.getElementById('btn-lente');
   wrap.classList.toggle('lens-on', lenteOn);
   wrap.classList.toggle('lens-off', !lenteOn);
   btn.classList.toggle('lente-on', lenteOn);
-  btn.textContent = lenteOn ? '🔍 Lente ON' : '🔍 Lente';
+  btn.textContent = lenteOn ? `🔍 Lente ${LENS_LEVELS[lensLevelIdx]}×` : '🔍 Lente';
   if (!lenteOn) document.getElementById('lens-glass').style.display = 'none';
+}
+
+function cicleZoomLente() {
+  // Aumenta lo zoom della lente scorrendo tra i livelli disponibili;
+  // tornando a quello più basso dopo il massimo
+  if (!lenteOn) { toggleLente(); return; }
+  lensLevelIdx = (lensLevelIdx + 1) % LENS_LEVELS.length;
+  document.getElementById('btn-lente').textContent = `🔍 Lente ${LENS_LEVELS[lensLevelIdx]}×`;
 }
 
 function initLens() {
@@ -1581,18 +1608,19 @@ function initLens() {
     // Rapporto tra dimensione naturale e visualizzata
     const ratioX = img.naturalWidth  / rect.width;
     const ratioY = img.naturalHeight / rect.height;
+    const zoom = LENS_LEVELS[lensLevelIdx];
 
     // Dimensione del cerchio lente in px naturali dell'immagine
     const lensW = glass.offsetWidth;
     const lensH = glass.offsetHeight;
 
     // Background-size = immagine scalata per lo zoom
-    const bgW = rect.width  * LENS_ZOOM;
-    const bgH = rect.height * LENS_ZOOM;
+    const bgW = rect.width  * zoom;
+    const bgH = rect.height * zoom;
 
     // Background-position: centra il punto del cursore nella lente
-    const bgX = mx * LENS_ZOOM - lensW / 2;
-    const bgY = my * LENS_ZOOM - lensH / 2;
+    const bgX = mx * zoom - lensW / 2;
+    const bgY = my * zoom - lensH / 2;
 
     glass.style.backgroundImage  = `url('${img.src}')`;
     glass.style.backgroundSize   = `${bgW}px ${bgH}px`;
@@ -1947,6 +1975,138 @@ function ripristinaMissione() {
   updateStepDot(1, 'active');
 }
 
+// ════════════════════════════════════════════
+//  SALVA / CARICA SESSIONE
+// ════════════════════════════════════════════
+// Il file di sessione (.json) contiene: dati missione, campi Report Fine Missione,
+// tracce complete e i METADATI delle foto (nome, dimensione, EXIF, checklist compilata).
+// Le immagini stesse NON vengono salvate (troppo pesanti): al caricamento della
+// sessione basta riselezionare la stessa cartella foto e i dati compilati vengono
+// riabbinati automaticamente per nome+dimensione file.
+let pendingSession = null; // sessione caricata in attesa di riabbinare le foto
+
+const SESSION_FIELD_IDS = [
+  'qualifica1','nome1','qualifica2','nome2','collaborazione','comune','data-missione','matricola',
+  's-rgb','s-term','s-multi',
+  'fm-ora-iniz','fm-ora-fine','fm-focolai','fm-anomalie-term','fm-nessuna-criticita',
+  'fm-diff-meteo','fm-meteo-dalle','fm-meteo-alle',
+  'fm-diff-pioggia','fm-pioggia-dalle','fm-pioggia-alle',
+  'fm-diff-tecnico','fm-diff-tecnico-txt','fm-diff-altro','fm-diff-altro-txt',
+  'fm-relazione','fm-eff-ok','fm-eff-anom','fm-azioni'
+];
+
+function saveSession() {
+  const fields = {};
+  SESSION_FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    fields[id] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value;
+  });
+
+  const session = {
+    app: 'SkyReportVVF',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    fields,
+    kmlFiles: kmlFiles.map(k => ({ name: k.name, color: k.color, coords: k.coords })),
+    photos: photos.map(p => ({
+      name: p.file.name,
+      size: p.file.size,
+      lat: p.lat, lon: p.lon, altASL: p.altASL, altAGL: p.altAGL,
+      droneModel: p.droneModel,
+      tsScatto: p.tsScatto ? p.tsScatto.toISOString() : null,
+      scartata: p.scartata,
+      entry: p.entry
+    }))
+  };
+
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
+  const dataStr = (document.getElementById('data-missione').value || new Date().toISOString().slice(0,10)).replace(/-/g, '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `SkyReport_Sessione_${dataStr}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast(`Sessione salvata (${photos.length} foto, ${kmlFiles.length} tracce). Ricorda: al ripristino dovrai riselezionare la cartella foto.`, 'success');
+}
+
+async function loadSessionFile(file) {
+  if (!file) return;
+  let session;
+  try {
+    session = JSON.parse(await readFileAsText(file));
+    if (session.app !== 'SkyReportVVF') throw new Error('formato non riconosciuto');
+  } catch (e) {
+    toast('File di sessione non valido.', 'error');
+    return;
+  }
+
+  // 1. Ripristina i campi della UI
+  Object.entries(session.fields || {}).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!val;
+    else el.value = val;
+    // Attiva i listener di visibilità condizionale (pioggia/meteo orari, campi testo)
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
+  // 2. Ripristina le tracce (complete, non serve rifornire i file)
+  if (Array.isArray(session.kmlFiles) && session.kmlFiles.length) {
+    kmlFiles = session.kmlFiles.map(k => ({ name: k.name, color: k.color, coords: k.coords }));
+    renderKMLList();
+    const card = document.getElementById('kml-sidebar-card');
+    if (card) card.style.display = '';
+    setTimeout(() => renderKMLMap(), 60);
+  }
+
+  // 3. Foto: memorizza i metadati e chiedi di riselezionare la cartella
+  if (Array.isArray(session.photos) && session.photos.length) {
+    pendingSession = session;
+    if (photos.length) {
+      // Foto già caricate: prova subito il riabbinamento
+      applyPendingSession();
+    } else {
+      toast(`Sessione caricata: ${session.photos.length} foto da riabbinare. Seleziona ora la stessa cartella foto della missione.`, 'info');
+      // Apri direttamente il selettore cartella per comodità
+      const folderInput = document.getElementById('folder-input');
+      if (folderInput) setTimeout(() => folderInput.click(), 600);
+    }
+  } else {
+    toast('Sessione caricata (dati missione e tracce ripristinati).', 'success');
+  }
+
+  // Reset dell'input per poter ricaricare lo stesso file in futuro
+  document.getElementById('session-load-input').value = '';
+}
+
+// Riabbina i metadati salvati alle foto attualmente caricate (match per nome+size)
+function applyPendingSession() {
+  if (!pendingSession) return;
+  let matched = 0;
+  const saved = pendingSession.photos || [];
+  photos.forEach(p => {
+    const s = saved.find(x => x.name === p.file.name && x.size === p.file.size);
+    if (!s) return;
+    p.lat = s.lat; p.lon = s.lon; p.altASL = s.altASL; p.altAGL = s.altAGL;
+    p.droneModel = s.droneModel;
+    p.tsScatto = s.tsScatto ? new Date(s.tsScatto) : p.tsScatto;
+    p.scartata = !!s.scartata;
+    p.entry = s.entry || p.entry;
+    matched++;
+  });
+  const missing = saved.length - matched;
+  pendingSession = null;
+  renderPhotoGrid();
+  updatePhotoCount();
+  updateGeneraBtn();
+  if (matched) {
+    toast(`✓ Sessione ripristinata: ${matched} foto riabbinate${missing > 0 ? `, ${missing} non trovate nella cartella` : ''}.`, missing > 0 ? 'info' : 'success');
+  } else {
+    toast('Nessuna foto della sessione trovata: hai selezionato la cartella giusta?', 'error');
+  }
+}
+
 function updateGeneraBtn() {
   const btn = document.getElementById('btn-genera');
   btn.disabled = photos.filter(p => !p.scartata).length === 0;
@@ -1961,16 +2121,31 @@ function updateStepDot(n, state) {
 //  KML / GPX
 // ════════════════════════════════════════════
 async function handleKMLFiles(files, merge = false) {
-  const arr = Array.from(files).filter(f => /\.(kml|gpx)$/i.test(f.name));
+  const arr = Array.from(files).filter(f => /\.(kml|gpx|kmz)$/i.test(f.name));
   if (!arr.length) return;
 
   if (!merge) kmlFiles = [];
 
   for (let i = 0; i < arr.length; i++) {
     if (kmlFiles.find(k => k.name === arr[i].name)) continue;
-    const text = await readFileAsText(arr[i]);
     const ext = arr[i].name.split('.').pop().toLowerCase();
-    const coords = ext === 'kml' ? parseKML(text) : parseGPX(text);
+    let coords;
+    try {
+      if (ext === 'kmz') {
+        const text = await extractKMLFromKMZ(arr[i]);
+        coords = parseKML(text);
+      } else if (ext === 'kml') {
+        const text = await readFileAsText(arr[i]);
+        coords = parseKML(text);
+      } else {
+        const text = await readFileAsText(arr[i]);
+        coords = parseGPX(text);
+      }
+    } catch (e) {
+      console.warn('Errore lettura traccia:', arr[i].name, e.message);
+      toast(e.message || `Impossibile leggere ${arr[i].name}.`, 'error');
+      continue;
+    }
     const colorIdx = kmlFiles.length % KML_COLORS.length;
     kmlFiles.push({ name: arr[i].name, color: KML_COLORS[colorIdx], coords });
   }
@@ -1984,7 +2159,15 @@ async function handleKMLFiles(files, merge = false) {
     setTimeout(() => renderKMLMap(), 60);
   }
   updateLoadSummary(0, 0, 0, 100);
-  if (kmlFiles.length) toast(`${kmlFiles.length} tracce KML/GPX caricate.`, 'info');
+  if (kmlFiles.length) toast(`${kmlFiles.length} tracce caricate.`, 'info');
+}
+
+// Estrae il primo file .kml contenuto in un archivio .kmz (che è uno ZIP)
+async function extractKMLFromKMZ(file) {
+  const zip = await JSZip.loadAsync(file);
+  const kmlEntry = Object.values(zip.files).find(f => !f.dir && /\.kml$/i.test(f.name));
+  if (!kmlEntry) throw new Error('Nessun file .kml trovato dentro il KMZ');
+  return kmlEntry.async('text');
 }
 
 function readFileAsText(file) {
