@@ -1174,8 +1174,7 @@
       <div class="detail-header">
         <div class="detail-header-name" id="detail-filename">—</div>
         <div class="flex-gap">
-          <button class="btn btn-secondary" id="btn-lente" onclick="toggleLente()" title="Attiva lente di ingrandimento">🔍 Lente</button>
-          <button class="btn btn-secondary" onclick="cicleZoomLente()" title="Aumenta zoom lente">🔍+</button>
+          <button class="btn btn-secondary" id="btn-lente" onclick="toggleLente()" title="Attiva lente di ingrandimento 6×">🔍 Lente</button>
           <button class="btn btn-secondary" onclick="prevPhoto()">← Prec.</button>
           <button class="btn btn-secondary" onclick="nextPhoto()">Succ. →</button>
           <button class="btn btn-secondary" onclick="closeDetail()">✕ Chiudi</button>
@@ -1240,7 +1239,8 @@ const VOLUME_LEVELS = [
   { id: 'L3', label: 'L3 — Elevato (> 10 m³)',    short: 'Elevato  > 10 m3',    color: '#c0272d' },
 ];
 
-let photos = [];       // [{file, lat, lon, alt, entry:{...}}]
+let photos = [];       // [{file, thumbURL, lat, lon, alt, entry:{...}}]
+let detailObjUrl = null; // object URL della foto aperta nel pannello dettaglio
 let kmlFiles = [];     // [{name, content, color, coords}]
 let activeIdx = -1;
 let kmlMap = null;
@@ -1400,7 +1400,11 @@ async function handlePhotoFiles(files) {
         if (combined) droneModel = combined;
       } catch(e) {}
 
-      photos.push({ file, lat, lon, altASL, altAGL, droneModel, tsScatto, scartata: false,
+      // Miniatura ridotta generata una sola volta: la griglia non deve mai
+      // caricare il JPEG a piena risoluzione (decodifica ~80 MB per foto).
+      const thumbURL = await makeThumb(file);
+
+      photos.push({ file, thumbURL, lat, lon, altASL, altAGL, droneModel, tsScatto, scartata: false,
         entry: { checklist: [], altro: '', noteOperative: '', wasteState: WASTE_STATES[1], siteChar: SITE_CHARS[1], volumeLevel: '' }
       });
       loaded++;
@@ -1493,6 +1497,51 @@ function readFileAsDataURL(file) {
 }
 
 // ════════════════════════════════════════════
+//  MINIATURE — generate una volta sola al caricamento
+// ════════════════════════════════════════════
+// Una foto DJI da 12 MP occupa ~80 MB di bitmap una volta decodificata dal
+// browser: con 30 foto la griglia arrivava a oltre 2 GB e il rendering
+// scattava. Qui produciamo un JPEG da 400 px (~30 KB) per ogni card.
+const THUMB_MAX = 400;
+
+async function makeThumb(file) {
+  let bmp = null, tmpUrl = null;
+  try {
+    if (window.createImageBitmap) {
+      // resizeWidth ridimensiona già in fase di decodifica dove supportato
+      try {
+        bmp = await createImageBitmap(file, { resizeWidth: THUMB_MAX, resizeQuality: 'medium' });
+      } catch (e) {
+        bmp = await createImageBitmap(file);
+      }
+    } else {
+      tmpUrl = URL.createObjectURL(file);
+      bmp = await loadImage(tmpUrl);
+    }
+
+    const sw = bmp.width  || bmp.naturalWidth;
+    const sh = bmp.height || bmp.naturalHeight;
+    if (!sw || !sh) throw new Error('dimensioni immagine non valide');
+
+    const sc = Math.min(1, THUMB_MAX / Math.max(sw, sh));
+    const cv = document.createElement('canvas');
+    cv.width  = Math.max(1, Math.round(sw * sc));
+    cv.height = Math.max(1, Math.round(sh * sc));
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
+    cv.width = cv.height = 0; // libera subito la memoria del canvas
+    return blob ? URL.createObjectURL(blob) : URL.createObjectURL(file);
+  } catch (e) {
+    console.warn('Miniatura non generata, uso il file originale:', file.name, e);
+    return URL.createObjectURL(file);
+  } finally {
+    if (bmp && bmp.close) bmp.close();
+    if (tmpUrl) URL.revokeObjectURL(tmpUrl);
+  }
+}
+
+// ════════════════════════════════════════════
 //  SIDEBAR MOBILE — apri/chiudi
 // ════════════════════════════════════════════
 function svuotaCache() {
@@ -1517,39 +1566,83 @@ function closeSidebarOnMobile() {
   }
 }
 
+// Crea la struttura DOM di una card. Chiamata una sola volta per foto:
+// gli aggiornamenti successivi passano da updatePhotoCard().
+function buildPhotoCard() {
+  const wrap = document.createElement('div');
+  wrap.className = 'photo-card-wrap';
+
+  const card = document.createElement('div');
+  card.className = 'photo-card';
+
+  const img = document.createElement('img');
+  img.className = 'photo-thumb';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+
+  const info = document.createElement('div');
+  info.className = 'photo-info';
+  const name = document.createElement('span');
+  name.className = 'photo-name';
+  const badge = document.createElement('span');
+  badge.className = 'photo-badge';
+  info.appendChild(name);
+  info.appendChild(badge);
+
+  const gps = document.createElement('div');
+  gps.className = 'gps-tag';
+
+  card.appendChild(img);
+  card.appendChild(info);
+  card.appendChild(gps);
+
+  const btnScarta = document.createElement('button');
+  btnScarta.className = 'btn-scarta';
+
+  wrap.appendChild(card);
+  wrap.appendChild(btnScarta);
+
+  wrap._card = card; wrap._img = img; wrap._name = name;
+  wrap._badge = badge; wrap._gps = gps; wrap._btn = btnScarta;
+  return wrap;
+}
+
+// Aggiorna in place una card esistente: nessun nodo <img> viene ricreato,
+// quindi il browser non ridecodifica le immagini a ogni render.
+function updatePhotoCard(wrap, p, i) {
+  const done = !p.scartata && (p.entry.checklist.length > 0 || p.entry.noteOperative.trim());
+
+  wrap.className = 'photo-card-wrap' + (p.scartata ? ' scartata' : '');
+  wrap._card.className = 'photo-card' + (i === activeIdx ? ' active' : '') + (done ? ' done' : '');
+
+  if (p.thumbURL && wrap._img.getAttribute('src') !== p.thumbURL) {
+    wrap._img.src = p.thumbURL;
+  }
+  wrap._img.alt = p.file.name;
+
+  wrap._name.textContent = p.file.name;
+  wrap._name.title = p.file.name;
+  wrap._badge.className = 'photo-badge ' + (p.scartata ? 'badge-scartata' : done ? 'badge-done' : 'badge-pending');
+  wrap._badge.textContent = p.scartata ? '✕ Scartata' : done ? '✓ OK' : 'Da fare';
+  wrap._gps.textContent = '📍 ' + (p.lat !== 'N/D' ? p.lat + ', ' + p.lon : 'GPS non disponibile');
+
+  wrap._card.onclick = p.scartata ? null : () => openDetail(i);
+
+  wrap._btn.textContent = p.scartata ? '↩ Ripristina' : '✕ Scarta';
+  wrap._btn.title = p.scartata ? 'Ripristina foto nel PDF' : 'Escludi foto dal PDF';
+  wrap._btn.onclick = (e) => { e.stopPropagation(); toggleScarta(i); };
+}
+
 function renderPhotoGrid() {
   const grid = document.getElementById('photo-grid');
-  grid.innerHTML = '';
+
+  // Rimuove solo le card in eccesso (es. dopo un reset)
+  while (grid.children.length > photos.length) grid.removeChild(grid.lastChild);
+
   photos.forEach((p, i) => {
-    const done = !p.scartata && (p.entry.checklist.length > 0 || p.entry.noteOperative.trim());
-    const wrap = document.createElement('div');
-    wrap.className = 'photo-card-wrap' + (p.scartata ? ' scartata' : '');
-
-    const card = document.createElement('div');
-    card.className = 'photo-card' + (i === activeIdx ? ' active' : '') + (done ? ' done' : '');
-
-    card.innerHTML = `
-      <img class="photo-thumb" src="${URL.createObjectURL(p.file)}" alt="${p.file.name}">
-      <div class="photo-info">
-        <span class="photo-name">${p.file.name}</span>
-        <span class="photo-badge ${p.scartata ? 'badge-scartata' : done ? 'badge-done' : 'badge-pending'}">
-          ${p.scartata ? '✕ Scartata' : done ? '✓ OK' : 'Da fare'}
-        </span>
-      </div>
-      <div class="gps-tag">📍 ${p.lat !== 'N/D' ? p.lat + ', ' + p.lon : 'GPS non disponibile'}</div>
-    `;
-    if (!p.scartata) card.onclick = () => openDetail(i);
-
-    // Pulsante scarta/ripristina
-    const btnScarta = document.createElement('button');
-    btnScarta.className = 'btn-scarta';
-    btnScarta.textContent = p.scartata ? '↩ Ripristina' : '✕ Scarta';
-    btnScarta.title = p.scartata ? 'Ripristina foto nel PDF' : 'Escludi foto dal PDF';
-    btnScarta.onclick = (e) => { e.stopPropagation(); toggleScarta(i); };
-
-    wrap.appendChild(card);
-    wrap.appendChild(btnScarta);
-    grid.appendChild(wrap);
+    let wrap = grid.children[i];
+    if (!wrap) { wrap = buildPhotoCard(); grid.appendChild(wrap); }
+    updatePhotoCard(wrap, p, i);
   });
 }
 
@@ -1567,29 +1660,18 @@ function toggleScarta(idx) {
 // ════════════════════════════════════════════
 //  LENTE DI INGRANDIMENTO sul detail panel
 // ════════════════════════════════════════════
-const LENS_ZOOM = 3; // zoom predefinito fisso
+const LENS_ZOOM = 6; // unico livello di zoom della lente
 let lenteOn = false;
-const LENS_LEVELS = [3, 6, 10]; // livelli di zoom disponibili, ciclabili
-let lensLevelIdx = 0;
 
 function toggleLente() {
   lenteOn = !lenteOn;
-  lensLevelIdx = 0;
   const wrap = document.getElementById('img-lens-wrap');
   const btn  = document.getElementById('btn-lente');
   wrap.classList.toggle('lens-on', lenteOn);
   wrap.classList.toggle('lens-off', !lenteOn);
   btn.classList.toggle('lente-on', lenteOn);
-  btn.textContent = lenteOn ? `🔍 Lente ${LENS_LEVELS[lensLevelIdx]}×` : '🔍 Lente';
+  btn.textContent = lenteOn ? `🔍 Lente ${LENS_ZOOM}×` : '🔍 Lente';
   if (!lenteOn) document.getElementById('lens-glass').style.display = 'none';
-}
-
-function cicleZoomLente() {
-  // Aumenta lo zoom della lente scorrendo tra i livelli disponibili;
-  // tornando a quello più basso dopo il massimo
-  if (!lenteOn) { toggleLente(); return; }
-  lensLevelIdx = (lensLevelIdx + 1) % LENS_LEVELS.length;
-  document.getElementById('btn-lente').textContent = `🔍 Lente ${LENS_LEVELS[lensLevelIdx]}×`;
 }
 
 function initLens() {
@@ -1608,7 +1690,7 @@ function initLens() {
     // Rapporto tra dimensione naturale e visualizzata
     const ratioX = img.naturalWidth  / rect.width;
     const ratioY = img.naturalHeight / rect.height;
-    const zoom = LENS_LEVELS[lensLevelIdx];
+    const zoom = LENS_ZOOM;
 
     // Dimensione del cerchio lente in px naturali dell'immagine
     const lensW = glass.offsetWidth;
@@ -1669,7 +1751,11 @@ function openDetail(idx) {
 
   // Aggiorna solo i campi del panel — non tocca la griglia
   document.getElementById('detail-filename').textContent = p.file.name;
-  document.getElementById('detail-img').src = URL.createObjectURL(p.file);
+  // Un solo object URL vivo alla volta per la vista dettaglio:
+  // senza revoke ogni apertura tratteneva il file a piena risoluzione.
+  if (detailObjUrl) URL.revokeObjectURL(detailObjUrl);
+  detailObjUrl = URL.createObjectURL(p.file);
+  document.getElementById('detail-img').src = detailObjUrl;
   document.getElementById('d-lat').textContent = p.lat;
   document.getElementById('d-lon').textContent = p.lon;
   document.getElementById('d-alt-asl').textContent = p.altASL;
@@ -2646,6 +2732,14 @@ function drawPageFrame(pdf, title, subtitle) {
 }
 
 // Etichetta di sezione: barra rossa + testo, niente box pieno
+// Accorcia una stringa con "…" finché non sta nella larghezza indicata (mm)
+function fitText(pdf, text, maxW) {
+  let s = String(text || '');
+  if (pdf.getTextWidth(s) <= maxW) return s;
+  while (s.length > 1 && pdf.getTextWidth(s + '…') > maxW) s = s.slice(0, -1);
+  return s + '…';
+}
+
 function sectionLabel(pdf, text, y) {
   pdfFill(pdf, COL_RED);
   pdf.rect(MX, y, 2.4, 5.2, 'F');
@@ -3132,17 +3226,39 @@ async function drawLastPage(pdf) {
           y += mapH + 8;
         }
 
-        // Legenda
+        // Legenda — resta sempre dentro la pagina: se le voci non entrano
+        // in una colonna passa a due colonne, e taglia l'eccedenza.
         y = sectionLabel(pdf, 'Legenda tracce', y);
-        kmlFiles.forEach(kf => {
-          const rgb = hexToRgb(kf.color);
-          pdfFill(pdf, rgb);
-          pdf.roundedRect(MX, y - 1, 7, 4.5, 1, 1, 'F');
-          pdf.setFont('helvetica','normal'); pdf.setFontSize(9);
+
+        const LEG_BOTTOM = PAGE_H - 16;   // margine inferiore di sicurezza
+        const rowH = 6.4;
+        const rowsAvail = Math.max(1, Math.floor((LEG_BOTTOM - y) / rowH));
+        const cols = kmlFiles.length > rowsAvail ? 2 : 1;
+        const colW = CW / cols;
+        const maxItems = rowsAvail * cols;
+        const items = kmlFiles.slice(0, maxItems);
+        const perCol = Math.max(1, Math.ceil(items.length / cols));
+
+        pdf.setFont('helvetica','normal'); pdf.setFontSize(9);
+        items.forEach((kf, i) => {
+          const col = Math.floor(i / perCol);
+          const row = i % perCol;
+          const x  = MX + col * colW;
+          const ry = y + row * rowH;
+
+          pdfFill(pdf, hexToRgb(kf.color));
+          pdf.roundedRect(x, ry - 1, 7, 4.5, 1, 1, 'F');
           pdfRgb(pdf, COL_INK);
-          pdf.text(kf.name, MX + 10, y + 2.4);
-          y += 7;
+          pdf.text(fitText(pdf, kf.name, colW - 13), x + 10, ry + 2.4);
         });
+        y += perCol * rowH;
+
+        // Eventuali tracce non rappresentate in legenda
+        if (kmlFiles.length > items.length) {
+          pdf.setFontSize(8);
+          pdfRgb(pdf, COL_GRAY);
+          pdf.text(`+ altre ${kmlFiles.length - items.length} tracce`, MX, Math.min(y + 2.4, LEG_BOTTOM + 4));
+        }
       } else {
         fallbackLastPage(pdf, y);
       }
