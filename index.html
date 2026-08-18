@@ -1164,6 +1164,14 @@
         <button class="btn btn-secondary" style="font-size:11px;padding:5px 14px;" onclick="document.getElementById('folder-input').click()">📁 Seleziona cartella</button>
       </div>
       <div class="drop-hint" style="margin-top:8px;">JPG · PNG · KML · GPX</div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+        <div class="drop-hint" style="margin-bottom:8px;">Hai un log di volo DJI (.txt)? Convertilo prima in KML</div>
+        <button class="btn btn-secondary" style="font-size:11px;padding:5px 14px;"
+                onclick="apriConvertitoreTracce()"
+                title="Apre Open DroneLog in una nuova scheda per convertire i log di volo DJI">
+          🔄 Converti tracce
+        </button>
+      </div>
     </div>
 
     <!-- Banner riepilogo caricamento -->
@@ -1485,6 +1493,16 @@ function updateLoadSummary(loaded, skipped, totalIncoming, pct) {
 
   el.innerHTML = h;
   el.classList.remove('hidden');
+}
+
+// ════════════════════════════════════════════
+//  CONVERSIONE LOG DI VOLO DJI
+// ════════════════════════════════════════════
+// I log .txt DJI dalla v13 in poi sono cifrati AES e la chiave va richiesta
+// alle API DJI, che non ammettono chiamate dal browser (nessun CORS).
+// La conversione avviene quindi su Open DroneLog, servizio esterno.
+function apriConvertitoreTracce() {
+  window.open('https://app.opendronelog.com/', '_blank', 'noopener,noreferrer');
 }
 
 function readFileAsDataURL(file) {
