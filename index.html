@@ -1249,6 +1249,12 @@ const VOLUME_LEVELS = [
 
 let photos = [];       // [{file, thumbURL, lat, lon, alt, entry:{...}}]
 let detailObjUrl = null; // object URL della foto aperta nel pannello dettaglio
+let advanceTimer = null; // timer del passaggio automatico alla foto successiva
+
+// Annulla un avanzamento automatico ancora in coda
+function cancelAutoAdvance() {
+  if (advanceTimer) { clearTimeout(advanceTimer); advanceTimer = null; }
+}
 let kmlFiles = [];     // [{name, content, color, coords}]
 let activeIdx = -1;
 let kmlMap = null;
@@ -1628,7 +1634,10 @@ function buildPhotoCard() {
 // Aggiorna in place una card esistente: nessun nodo <img> viene ricreato,
 // quindi il browser non ridecodifica le immagini a ogni render.
 function updatePhotoCard(wrap, p, i) {
-  const done = !p.scartata && (p.entry.checklist.length > 0 || p.entry.noteOperative.trim());
+  // "OK" solo con almeno un materiale in checklist: è la stessa condizione che
+  // generatePDF() richiede, così il badge non promette una foto che poi blocca
+  // la generazione. Una nota da sola non basta più.
+  const done = !p.scartata && p.entry.checklist.length > 0;
 
   wrap.className = 'photo-card-wrap' + (p.scartata ? ' scartata' : '');
   wrap._card.className = 'photo-card' + (i === activeIdx ? ' active' : '') + (done ? ' done' : '');
@@ -1756,7 +1765,10 @@ function updatePhotoCount() {
 // ════════════════════════════════════════════
 
 function openDetail(idx) {
-  saveCurrentDetail();
+  // Un eventuale avanzamento automatico ancora in coda va annullato:
+  // altrimenti dopo un click su miniatura la vista scorrerebbe da sola.
+  cancelAutoAdvance();
+  persistCurrentDetail();
 
   // Aggiorna active class sulla griglia senza ricreare tutto il DOM
   if (activeIdx >= 0) {
@@ -1798,7 +1810,8 @@ function openDetail(idx) {
 }
 
 function closeDetail() {
-  saveCurrentDetail();
+  cancelAutoAdvance();
+  persistCurrentDetail();
   activeIdx = -1;
   document.getElementById('detail-panel').classList.remove('visible');
   renderPhotoGrid(); // solo alla chiusura ricrea la griglia per aggiornare i badge
@@ -1935,10 +1948,51 @@ function onAltroCheckChange(idx, cb) {
   }
 }
 
-function saveCurrentDetail() {
+// Salva nella foto attiva quanto compilato nel form, senza validare, senza
+// toast e senza navigare. Serve solo a non perdere i dati quando si cambia
+// foto o si chiude il pannello: il passaggio automatico alla foto successiva
+// deve restare esclusiva del pulsante "Salva questa foto".
+function persistCurrentDetail() {
   if (activeIdx < 0) return;
   const idx = activeIdx;
   const p = photos[idx];
+  if (!p) return;
+
+  // Se il form di questa foto non è nel DOM non c'è nulla da leggere
+  const note  = document.getElementById(`d-note-${idx}`);
+  const waste = document.getElementById(`d-waste-${idx}`);
+  if (!note && !waste) return;
+
+  const allChecked = [];
+  Object.values(CHECKLIST).flat().forEach(item => {
+    const cb = document.getElementById(`chk_${idx}_${item.replace(/\W/g,'_')}`);
+    if (cb && cb.checked) allChecked.push(item);
+  });
+  p.entry.checklist = allChecked;
+
+  const altroInp = document.getElementById(`d-altro-inline-${idx}`);
+  const ch       = document.getElementById(`d-char-${idx}`);
+  if (altroInp) p.entry.altro = altroInp.value;
+  if (waste)    p.entry.wasteState = waste.value;
+  if (ch)       p.entry.siteChar = ch.value;
+  if (note)     p.entry.noteOperative = note.value;
+  const volRadio = document.querySelector(`input[name="d-vol-${idx}"]:checked`);
+  if (volRadio)  p.entry.volumeLevel = volRadio.value;
+
+  // Se "Altro" è in checklist ma il campo è vuoto, rimuovilo
+  if (p.entry.checklist.includes('Altro (specificare)') && !p.entry.altro.trim()) {
+    p.entry.checklist = p.entry.checklist.filter(i => i !== 'Altro (specificare)');
+    const cbAltro = document.getElementById(`chk_${idx}_Altro__specificare_`);
+    if (cbAltro) cbAltro.checked = false;
+  }
+
+  renderPhotoGrid();
+}
+
+// Pulsante "✓ Salva questa foto": valida, salva e avanza.
+function saveCurrentDetail() {
+  if (activeIdx < 0) return;
+  const idx = activeIdx;
 
   // ── Validazione obbligatoria ──
   // 1. Almeno un checkbox della checklist
@@ -1957,47 +2011,19 @@ function saveCurrentDetail() {
     return;
   }
 
-  // ── Leggi TUTTI i checkbox dal DOM al momento del salvataggio ──
-  // Questo è il fix principale: non affidarsi solo agli eventi onchange,
-  // ma leggere lo stato reale dei checkbox al click di "Salva".
-  const allChecked = [];
-  Object.values(CHECKLIST).flat().forEach(item => {
-    const safeId = `chk_${idx}_${item.replace(/\W/g,'_')}`;
-    const cb = document.getElementById(safeId);
-    if (cb && cb.checked) allChecked.push(item);
-  });
-  p.entry.checklist = allChecked;
-
-  // Leggi gli altri campi
-  const altroInp = document.getElementById(`d-altro-inline-${idx}`);
-  const waste    = document.getElementById(`d-waste-${idx}`);
-  const ch       = document.getElementById(`d-char-${idx}`);
-  const note     = document.getElementById(`d-note-${idx}`);
-  if (altroInp) p.entry.altro = altroInp.value;
-  if (waste)    p.entry.wasteState = waste.value;
-  if (ch)       p.entry.siteChar = ch.value;
-  if (note)     p.entry.noteOperative = note.value;
-  const volRadio = document.querySelector(`input[name="d-vol-${idx}"]:checked`);
-  if (volRadio)  p.entry.volumeLevel = volRadio.value;
-
-  // Se "Altro" è in checklist ma il campo è vuoto, rimuovilo
-  if (p.entry.checklist.includes('Altro (specificare)') && !p.entry.altro.trim()) {
-    p.entry.checklist = p.entry.checklist.filter(i => i !== 'Altro (specificare)');
-    const cbAltro = document.getElementById(`chk_${idx}_Altro__specificare_`);
-    if (cbAltro) cbAltro.checked = false;
-  }
-
-  renderPhotoGrid();
+  // Legge tutti i campi dal DOM e li scrive nella foto
+  persistCurrentDetail();
 
   // Passa automaticamente alla foto successiva (se esiste)
-  const nextIdx = photos.findIndex((p, i) => i > idx && !p.scartata);
+  cancelAutoAdvance();
+  const nextIdx = photos.findIndex((ph, i) => i > idx && !ph.scartata);
   if (nextIdx >= 0) {
     toast('Foto salvata. Prossima foto...', 'success');
-    setTimeout(() => openDetail(nextIdx), 400);
+    advanceTimer = setTimeout(() => { advanceTimer = null; openDetail(nextIdx); }, 400);
   } else {
     toast('Foto salvata.', 'success');
     // Ultima foto: chiudi il pannello
-    setTimeout(() => closeDetail(), 400);
+    advanceTimer = setTimeout(() => { advanceTimer = null; closeDetail(); }, 400);
   }
 }
 
@@ -2598,7 +2624,9 @@ function generateReportFineMissione(missione, activePhotos) {
 }
 
 async function generatePDF() {
-  saveCurrentDetail();
+  // Solo salvataggio: generare il PDF non deve far avanzare la vista foto
+  cancelAutoAdvance();
+  persistCurrentDetail();
 
   const q1gen    = document.getElementById('qualifica1').value.trim();
   const n1gen    = document.getElementById('nome1').value.trim();
