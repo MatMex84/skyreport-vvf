@@ -1631,13 +1631,18 @@ function buildPhotoCard() {
   return wrap;
 }
 
+// Una foto è ancora da completare se non supererebbe la validazione del
+// pulsante "Salva questa foto": serve almeno un materiale in checklist e il
+// volume stimato. Stessa regola per il badge della griglia e per decidere su
+// quale foto saltare dopo un salvataggio.
+function isDaCompletare(p) {
+  return !p.scartata && (p.entry.checklist.length === 0 || !p.entry.volumeLevel);
+}
+
 // Aggiorna in place una card esistente: nessun nodo <img> viene ricreato,
 // quindi il browser non ridecodifica le immagini a ogni render.
 function updatePhotoCard(wrap, p, i) {
-  // "OK" solo con almeno un materiale in checklist: è la stessa condizione che
-  // generatePDF() richiede, così il badge non promette una foto che poi blocca
-  // la generazione. Una nota da sola non basta più.
-  const done = !p.scartata && p.entry.checklist.length > 0;
+  const done = !p.scartata && !isDaCompletare(p);
 
   wrap.className = 'photo-card-wrap' + (p.scartata ? ' scartata' : '');
   wrap._card.className = 'photo-card' + (i === activeIdx ? ' active' : '') + (done ? ' done' : '');
@@ -2014,15 +2019,22 @@ function saveCurrentDetail() {
   // Legge tutti i campi dal DOM e li scrive nella foto
   persistCurrentDetail();
 
-  // Passa automaticamente alla foto successiva (se esiste)
+  // Salta alla prima foto ancora da completare, non semplicemente alla
+  // successiva: prima cerca in avanti, poi riparte dall'inizio. Così, tornando
+  // indietro a compilare una foto saltata, non si risfogliano quelle già fatte.
   cancelAutoAdvance();
-  const nextIdx = photos.findIndex((ph, i) => i > idx && !ph.scartata);
+  let nextIdx = photos.findIndex((ph, i) => i > idx && isDaCompletare(ph));
+  const inAvanti = nextIdx >= 0;
+  if (!inAvanti) nextIdx = photos.findIndex((ph, i) => i < idx && isDaCompletare(ph));
+
   if (nextIdx >= 0) {
-    toast('Foto salvata. Prossima foto...', 'success');
+    toast(inAvanti
+      ? 'Foto salvata. Prossima da completare…'
+      : 'Foto salvata. Torno indietro alla prima da completare…', 'success');
     advanceTimer = setTimeout(() => { advanceTimer = null; openDetail(nextIdx); }, 400);
   } else {
-    toast('Foto salvata.', 'success');
-    // Ultima foto: chiudi il pannello
+    toast('Foto salvata. Tutte le foto sono complete.', 'success');
+    // Non resta nulla da compilare: chiudi il pannello
     advanceTimer = setTimeout(() => { advanceTimer = null; closeDetail(); }, 400);
   }
 }
